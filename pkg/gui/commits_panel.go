@@ -579,25 +579,63 @@ func (gui *Gui) handleSquashAllAboveFixupCommits() error {
 }
 
 func (gui *Gui) handleTagCommit() error {
-	// TODO: bring up menu asking if you want to make a lightweight or annotated tag
-	// if annotated, switch to a subprocess to create the message
-
 	commit := gui.getSelectedLocalCommit()
 	if commit == nil {
 		return nil
 	}
 
-	return gui.handleCreateLightweightTag(commit.Sha)
+	return gui.createTagMenu(commit.Sha)
+}
+
+func (gui *Gui) createTagMenu(commitSha string) error {
+	items := []*menuItem{
+		{
+			displayString: gui.Tr.LcLightweightTag,
+			onPress: func() error {
+				return gui.handleCreateLightweightTag(commitSha)
+			},
+		},
+		{
+			displayString: gui.Tr.LcAnnotatedTag,
+			onPress: func() error {
+				return gui.handleCreateAnnotatedTag(commitSha)
+			},
+		},
+	}
+
+	return gui.createMenu(gui.Tr.TagMenuTitle, items, createMenuOptions{showCancel: true})
+}
+
+func (gui *Gui) afterTagCreate(tagName string) error {
+	gui.State.Panels.Tags.SelectedLineIdx = 0 // Set to the top
+	return gui.refreshSidePanels(refreshOptions{mode: ASYNC, scope: []RefreshableView{COMMITS, TAGS}})
+}
+
+func (gui *Gui) handleCreateAnnotatedTag(commitSha string) error {
+	return gui.prompt(promptOpts{
+		title: gui.Tr.TagNameTitle,
+		handleConfirm: func(tagName string) error {
+			return gui.prompt(promptOpts{
+				title: gui.Tr.TagMessageTitle,
+				handleConfirm: func(msg string) error {
+					if err := gui.GitCommand.WithSpan(gui.Tr.Spans.CreateAnnotatedTag).CreateAnnotatedTag(tagName, commitSha, msg); err != nil {
+						return gui.surfaceError(err)
+					}
+					return gui.afterTagCreate(tagName)
+				},
+			})
+		},
+	})
 }
 
 func (gui *Gui) handleCreateLightweightTag(commitSha string) error {
 	return gui.prompt(promptOpts{
 		title: gui.Tr.TagNameTitle,
-		handleConfirm: func(response string) error {
-			if err := gui.GitCommand.WithSpan(gui.Tr.Spans.CreateLightweightTag).CreateLightweightTag(response, commitSha); err != nil {
+		handleConfirm: func(tagName string) error {
+			if err := gui.GitCommand.WithSpan(gui.Tr.Spans.CreateLightweightTag).CreateLightweightTag(tagName, commitSha); err != nil {
 				return gui.surfaceError(err)
 			}
-			return gui.refreshSidePanels(refreshOptions{mode: ASYNC, scope: []RefreshableView{COMMITS, TAGS}})
+			return gui.afterTagCreate(tagName)
 		},
 	})
 }
